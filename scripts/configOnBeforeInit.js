@@ -123,9 +123,12 @@ if (scheduleType == '1') {
 } else {
     jps.settings.main.fields[0].showIf[3][0].default = '${settings.cronTime}';
 }
-
+// this is based on the indexes of the settings.main.fields from the backup.jps file
 jps.settings.main.fields[2].default = '${settings.backupCount}';
-jps.settings.main.fields[jps.settings.main.fields.length - 2].default = '${settings.dbuser}';
-jps.settings.main.fields[jps.settings.main.fields.length - 1].default = '${settings.dbpass}';
+jps.settings.main.fields[4].default = '${settings.dbuser}';
+jps.settings.main.fields[5].default = '${settings.dbpass}';
+jps.settings.main.fields[6].default = '${settings.dbname}';
+jps.settings.main.fields[7].default = '${settings.reponame}';
+jps.settings.main.fields[8].default = '${settings.repopass}';
 
 return settings;

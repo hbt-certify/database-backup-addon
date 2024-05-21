@@ -5,20 +5,23 @@ var action = getParam("action", "backup"),
 
 function run() {
     var BackupManager = use("scripts/backup-manager.js", {
-        session           : session,
-        baseUrl           : baseUrl,
-        uid               : user.uid,
-        cronTime          : "${cronTime}",
-        scriptName        : "${scriptName}",
-        envName           : "${envName}",
-        envAppid          : "${envAppid}",
-        storageNodeId     : "${storageNodeId}",
-        backupExecNode 	  : "${backupExecNode}",
-        backupCount       : "${backupCount}",
-        storageEnv        : "${storageEnv}",
-        nodeGroup         : "${nodeGroup}",
-        dbuser            : "${dbuser}",
-        dbpass            : "${dbpass}"
+        session: session,
+        baseUrl: baseUrl,
+        uid: user.uid,
+        cronTime: "${cronTime}",
+        scriptName: "${scriptName}",
+        envName: "${envName}",
+        envAppid: "${envAppid}",
+        storageNodeId: "${storageNodeId}",
+        backupExecNode: "${backupExecNode}",
+        backupCount: "${backupCount}",
+        storageEnv: "${storageEnv}",
+        nodeGroup: "${nodeGroup}",
+        dbuser: "${dbuser}",
+        dbpass: "${dbpass}",
+        dbname: "${dbname}",
+        reponame: "${reponame}",
+        repopass: "${repopass}"
     });
 
     jelastic.local.ReturnResult(
@@ -38,7 +41,7 @@ try {
     run();
 } catch (ex) {
     var resp = {
-        result : com.hivext.api.Response.ERROR_UNKNOWN,
+        result: com.hivext.api.Response.ERROR_UNKNOWN,
         error: "Error: " + toJSON(ex)
     };
 

@@ -1,34 +1,40 @@
 //@auth
 //@req(baseUrl, cronTime, dbuser, dbpass)
-
-var scriptName        = getParam("scriptName", "${env.envName}-wp-backup"),
-    envName           = getParam("envName", "${env.envName}"),
-    envAppid          = getParam("envAppid", "${env.appid}"),
-    userId            = getparam("userId", ""),
-    backupCount       = getParam("backupCount", "5"),
-    storageNodeId     = getParam("storageNodeId"),
-    backupExecNode    = getParam("backupExecNode"),
-    storageEnv        = getParam("storageEnv"),
-    nodeGroup         = getParam("nodeGroup"),
-    dbuser            = getParam("dbuser"),
-    dbpass            = getParam("dbpass");
+var reponame = getParam("reponame");
+var defaultScriptName = "${env.envName}-wp-backup-" + reponame;
+var scriptName = getParam("scriptName", defaultScriptName);
+var envName = getParam("envName", "${env.envName}");
+var envAppid = getParam("envAppid", "${env.appid}");
+var userId = getparam("userId", "");
+var backupCount = getParam("backupCount", "5");
+var storageNodeId = getParam("storageNodeId");
+var backupExecNode = getParam("backupExecNode");
+var storageEnv = getParam("storageEnv");
+var nodeGroup = getParam("nodeGroup");
+var dbuser = getParam("dbuser");
+var dbpass = getParam("dbpass");
+var dbname = getParam("dbname");
+var repopass = getParam("repopass");
 
 function run() {
     var BackupManager = use("scripts/backup-manager.js", {
-        session           : session,
-        baseUrl           : baseUrl,
-        uid               : userId,
-        cronTime          : cronTime,
-        scriptName        : scriptName,
-        envName           : envName,
-        envAppid          : envAppid,
-        backupCount       : backupCount,
-        storageNodeId     : storageNodeId,
-        backupExecNode    : backupExecNode,
-        storageEnv        : storageEnv,
-        nodeGroup         : nodeGroup,
-        dbuser            : dbuser,
-        dbpass            : dbpass
+        session: session,
+        baseUrl: baseUrl,
+        uid: userId,
+        cronTime: cronTime,
+        scriptName: scriptName,
+        envName: envName,
+        envAppid: envAppid,
+        storageNodeId: storageNodeId,
+        backupExecNode: backupExecNode,
+        nodeGroup: nodeGroup,
+        storageEnv: storageEnv,
+        backupCount: backupCount,
+        dbuser: dbuser,
+        dbpass: dbpass,
+        dbname: dbname,
+        reponame: reponame,
+        repopass: repopass,
     });
 
     jelastic.local.ReturnResult(
@@ -38,7 +44,7 @@ function run() {
 
 function use(script, config) {
     var Transport = com.hivext.api.core.utils.Transport,
-        url = baseUrl + "/" + script + "?_r=" + Math.random(),   
+        url = baseUrl + "/" + script + "?_r=" + Math.random(),
         body = new Transport().get(url);
     return new (new Function("return " + body)())(config);
 }
@@ -47,7 +53,7 @@ try {
     run();
 } catch (ex) {
     var resp = {
-        result : com.hivext.api.Response.ERROR_UNKNOWN,
+        result: com.hivext.api.Response.ERROR_UNKNOWN,
         error: "Error: " + toJSON(ex)
     };
 

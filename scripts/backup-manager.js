@@ -16,6 +16,9 @@ function BackupManager(config) {
      *  [backupCount] : {String}
      *  [dbuser]: {String}
      *  [dbpass]: {String}
+     *  [dbname]: {String}
+     *  [reponame]: {String}
+     *  [repopass]: {String}
      * }} config
      * @constructor
      */
@@ -27,7 +30,7 @@ function BackupManager(config) {
         Random = com.hivext.api.utils.Random,
         SimpleDateFormat = java.text.SimpleDateFormat,
         StrSubstitutor = org.apache.commons.lang3.text.StrSubstitutor,
-	Scripting = com.hivext.api.development.Scripting,
+        Scripting = com.hivext.api.development.Scripting,
         LoggerFactory = org.slf4j.LoggerFactory,
         LoggerName = "scripting.logger.backup-addon:" + config.envName,
         Logger = LoggerFactory.getLogger(LoggerName),
@@ -42,16 +45,16 @@ function BackupManager(config) {
 
     me.invoke = function (action) {
         var actions = {
-            "install"         : me.install,
-            "uninstall"       : me.uninstall,
-            "backup"          : me.backup,
-            "restore"         : me.restore
+            "install": me.install,
+            "uninstall": me.uninstall,
+            "backup": me.backup,
+            "restore": me.restore
         };
 
         if (!actions[action]) {
             return {
-                result : Response.ERROR_UNKNOWN,
-                error : "unknown action [" + action + "]"
+                result: Response.ERROR_UNKNOWN,
+                error: "unknown action [" + action + "]"
             }
         }
 
@@ -62,43 +65,43 @@ function BackupManager(config) {
         var resp;
 
         return me.exec([
-	    [ me.cmd, [
+            [me.cmd, [
                 'echo $(date) %(envName) "Creating the backup task for %(envName) with the backup count %(backupCount), backup schedule %(cronTime) and backup storage env %(storageEnv)" | tee -a %(backupLogFile)'
             ], {
-                nodeId : config.backupExecNode,
-                envName : config.envName,
-                cronTime : config.cronTime,
-                storageEnv : config.storageEnv,
-                backupCount : config.backupCount,
-                backupLogFile : "/var/log/backup_addon.log"
+                nodeId: config.backupExecNode,
+                envName: config.envName,
+                cronTime: config.cronTime,
+                storageEnv: config.storageEnv,
+                backupCount: config.backupCount,
+                backupLogFile: "/var/log/backup_addon.log"
             }],
-            [ me.createScript   ],
-            [ me.clearScheduledBackups ],
-            [ me.scheduleBackup ]
+            [me.createScript],
+            [me.clearScheduledBackups],
+            [me.scheduleBackup]
         ]);
     };
 
     me.uninstall = function () {
         return me.exec(me.clearScheduledBackups);
     };
-	
+
     me.checkCurrentlyRunningBackup = function () {
-	var resp = me.exec([
-            [ me.cmd, [
+        var resp = me.exec([
+            [me.cmd, [
                 'pgrep -f "%(envName)"_backup-logic.sh 1>/dev/null && echo "Running"; true'
             ], {
-                nodeId : config.backupExecNode,
-                envName : config.envName
+                nodeId: config.backupExecNode,
+                envName: config.envName
             }]
         ]);
-	if (resp.responses[0].out == "Running") {
-	    return {
-                result : Response.ERROR_UNKNOWN,
-                error : "Another backup process is already running"
+        if (resp.responses[0].out == "Running") {
+            return {
+                result: Response.ERROR_UNKNOWN,
+                error: "Another backup process is already running"
             }
-	} else {
-	    return { "result": 0};
-	}
+        } else {
+            return {"result": 0};
+        }
     }
 
     me.backup = function () {
@@ -111,112 +114,115 @@ function BackupManager(config) {
             backupType = "auto";
         }
 
-	var backupCallParams = {
-                nodeId : config.backupExecNode,
-                envName : config.envName,
-                backupCount : config.backupCount,
-                backupLogFile : "/var/log/backup_addon.log",
-                baseUrl : config.baseUrl,
-                backupType : backupType,
-                dbuser: config.dbuser,
-                dbpass: config.dbpass,
-                session : session,
-                email : user.email
-            }
-        
+        var backupCallParams = {
+            nodeId: config.backupExecNode,
+            envName: config.envName,
+            backupCount: config.backupCount,
+            backupLogFile: "/var/log/backup_addon.log",
+            baseUrl: config.baseUrl,
+            backupType: backupType,
+            dbuser: config.dbuser,
+            dbpass: config.dbpass,
+            session: session,
+            email: user.email,
+            dbname: config.dbname,
+            reponame: config.reponame,
+            repopass: config.repopass
+        }
+
         return me.exec([
-            [ me.checkEnvStatus ],
-            [ me.checkStorageEnvStatus ],
-	    [ me.checkCurrentlyRunningBackup ],
-	    [ me.checkCredentials ],
-            [ me.removeMounts ],
-            [ me.addMountForBackup ],
-            [ me.cmd, [
-		'[ -f /root/%(envName)_backup-logic.sh ] && rm -f /root/%(envName)_backup-logic.sh || true',
+            [me.checkEnvStatus],
+            [me.checkStorageEnvStatus],
+            [me.checkCurrentlyRunningBackup],
+            [me.checkCredentials],
+            [me.removeMounts],
+            [me.addMountForBackup],
+            [me.cmd, [
+                '[ -f /root/%(envName)_backup-logic.sh ] && rm -f /root/%(envName)_backup-logic.sh || true',
                 'wget -O /root/%(envName)_backup-logic.sh %(baseUrl)/scripts/backup-logic.sh'
             ], {
-		nodeId : config.backupExecNode,
-                envName : config.envName,
-		baseUrl : config.baseUrl
-	    }],
+                nodeId: config.backupExecNode,
+                envName: config.envName,
+                baseUrl: config.baseUrl
+            }],
             [me.cmd, [
                 'bash /root/%(envName)_backup-logic.sh update_restic %(baseUrl)'
-            ], backupCallParams ],
-            [ me.cmd, [
-                'bash /root/%(envName)_backup-logic.sh check_backup_repo %(baseUrl) %(backupType) %(nodeId) %(backupLogFile) %(envName) %(backupCount) %(dbuser) %(dbpass) %(session) %(email)'
-            ], backupCallParams ],
-            [ me.cmd, [
-                'bash /root/%(envName)_backup-logic.sh rotate_snapshots %(baseUrl) %(backupType) %(nodeId) %(backupLogFile) %(envName) %(backupCount) %(dbuser) %(dbpass) %(session) %(email)'
-            ], backupCallParams ],
-	    [ me.cmd, [
-                'bash /root/%(envName)_backup-logic.sh backup %(baseUrl) %(backupType) %(nodeId) %(backupLogFile) %(envName) %(backupCount) %(dbuser) %(dbpass)'
-            ], backupCallParams ],
-	    [ me.cmd, [
-                'bash /root/%(envName)_backup-logic.sh create_snapshot %(baseUrl) %(backupType) %(nodeId) %(backupLogFile) %(envName) %(backupCount) %(dbuser) %(dbpass) %(session) %(email)'
-            ], backupCallParams ],
-            [ me.cmd, [
-                'bash /root/%(envName)_backup-logic.sh rotate_snapshots %(baseUrl) %(backupType) %(nodeId) %(backupLogFile) %(envName) %(backupCount) %(dbuser) %(dbpass) %(session) %(email)'
-            ], backupCallParams ],
-            [ me.cmd, [
-                'bash /root/%(envName)_backup-logic.sh check_backup_repo %(baseUrl) %(backupType) %(nodeId) %(backupLogFile) %(envName) %(backupCount) %(dbuser) %(dbpass) %(session) %(email)'
-            ], backupCallParams ],
-        [ me.removeMounts ]
+            ], backupCallParams],
+            [me.cmd, [
+                'bash /root/%(envName)_backup-logic.sh check_backup_repo %(baseUrl) %(backupType) %(nodeId) %(backupLogFile) %(envName) %(backupCount) %(dbuser) %(dbpass) %(dbname) %(reponame) %(repopass) %(session) %(email)'
+            ], backupCallParams],
+            [me.cmd, [
+                'bash /root/%(envName)_backup-logic.sh rotate_snapshots %(baseUrl) %(backupType) %(nodeId) %(backupLogFile) %(envName) %(backupCount) %(dbuser) %(dbpass) %(dbname) %(reponame) %(repopass) %(session) %(email)'
+            ], backupCallParams],
+            [me.cmd, [
+                'bash /root/%(envName)_backup-logic.sh backup %(baseUrl) %(backupType) %(nodeId) %(backupLogFile) %(envName) %(backupCount) %(dbuser) %(dbpass) %(dbname) %(reponame) %(repopass)'
+            ], backupCallParams],
+            [me.cmd, [
+                'bash /root/%(envName)_backup-logic.sh create_snapshot %(baseUrl) %(backupType) %(nodeId) %(backupLogFile) %(envName) %(backupCount) %(dbuser) %(dbpass) %(dbname) %(reponame) %(repopass) %(session) %(email)'
+            ], backupCallParams],
+            [me.cmd, [
+                'bash /root/%(envName)_backup-logic.sh rotate_snapshots %(baseUrl) %(backupType) %(nodeId) %(backupLogFile) %(envName) %(backupCount) %(dbuser) %(dbpass) %(dbname) %(reponame) %(repopass) %(session) %(email)'
+            ], backupCallParams],
+            [me.cmd, [
+                'bash /root/%(envName)_backup-logic.sh check_backup_repo %(baseUrl) %(backupType) %(nodeId) %(backupLogFile) %(envName) %(backupCount) %(dbuser) %(dbpass) %(dbname) %(reponame) %(repopass) %(session) %(email)'
+            ], backupCallParams],
+            [me.removeMounts]
         ]);
     };
 
     me.restore = function () {
         return me.exec([
-            [ me.checkEnvStatus ],
-            [ me.checkStorageEnvStatus ],
-	    [ me.checkCurrentlyRunningBackup ],
-	    [ me.checkCredentials ],
-            [ me.removeMounts ],
-            [ me.addMountForRestore ],
-            [ me.cmd, [
-	        '[ -f /root/%(envName)_backup-logic.sh ] && rm -f /root/%(envName)_backup-logic.sh || true',
+            [me.checkEnvStatus],
+            [me.checkStorageEnvStatus],
+            [me.checkCurrentlyRunningBackup],
+            [me.checkCredentials],
+            [me.removeMounts],
+            [me.addMountForRestore],
+            [me.cmd, [
+                '[ -f /root/%(envName)_backup-logic.sh ] && rm -f /root/%(envName)_backup-logic.sh || true',
                 'wget -O /root/%(envName)_backup-logic.sh %(baseUrl)/scripts/backup-logic.sh'
             ], {
-		nodeId : config.backupExecNode,
-                envName : config.envName,
-		baseUrl : config.baseUrl
-	    }],
+                nodeId: config.backupExecNode,
+                envName: config.envName,
+                baseUrl: config.baseUrl
+            }],
             [me.cmd, [
                 'bash /root/%(envName)_backup-logic.sh update_restic %(baseUrl)'
             ], {
-		nodeId : config.backupExecNode,
-                envName : config.envName,
-		baseUrl : config.baseUrl
-	    }],
-            [ me.cmd, [
+                nodeId: config.backupExecNode,
+                envName: config.envName,
+                baseUrl: config.baseUrl
+            }],
+            [me.cmd, [
                 'SNAPSHOT_ID=$(RESTIC_PASSWORD=$(cat /root/.backupedenv) restic -r /opt/backup/$(cat /root/.backupedenv) snapshots|grep $(cat /root/.backupid)|awk \'{print $1}\')',
                 '[ -n "${SNAPSHOT_ID}" ] || false',
-		'source /etc/jelastic/metainf.conf',
-		'RESTIC_PASSWORD=$(cat /root/.backupedenv) GOGC=20 restic -r /opt/backup/$(cat /root/.backupedenv) restore ${SNAPSHOT_ID} --target /',
-		'if [ "$COMPUTE_TYPE" == "redis" ]; then rm -f /root/redis-restore.sh; wget -O /root/redis-restore.sh %(baseUrl)/scripts/redis-restore.sh; chmod +x /root/redis-restore.sh; bash /root/redis-restore.sh 2> >(tee -a %(restoreLogFile) >&2); else true; fi',
-		'if [ "$COMPUTE_TYPE" == "postgres" ]; then PGPASSWORD=%(dbpass) psql --no-readline -q -U %(dbuser) -d postgres < /root/db_backup.sql 2> >(tee -a %(restoreLogFile) >&2); else true; fi',
-		'if [ "$COMPUTE_TYPE" == "mariadb" ]; then rm -f /root/mariadb-restore.sh; wget -O /root/mariadb-restore.sh %(baseUrl)/scripts/mariadb-restore.sh; chmod +x /root/mariadb-restore.sh; bash /root/mariadb-restore.sh %(dbuser) %(dbpass) 2> >(tee -a %(restoreLogFile) >&2); else true; fi',
-		'if [ "$COMPUTE_TYPE" == "mysql" ] || [ "$COMPUTE_TYPE" == "percona" ]; then mysql --silent -h localhost -u %(dbuser) -p%(dbpass) --force < /root/db_backup.sql 2> >(tee -a %(restoreLogFile) >&2); else true; fi',
+                'source /etc/jelastic/metainf.conf',
+                'RESTIC_PASSWORD=$(cat /root/.backupedenv) GOGC=20 restic -r /opt/backup/$(cat /root/.backupedenv) restore ${SNAPSHOT_ID} --target /',
+                'if [ "$COMPUTE_TYPE" == "redis" ]; then rm -f /root/redis-restore.sh; wget -O /root/redis-restore.sh %(baseUrl)/scripts/redis-restore.sh; chmod +x /root/redis-restore.sh; bash /root/redis-restore.sh 2> >(tee -a %(restoreLogFile) >&2); else true; fi',
+                'if [ "$COMPUTE_TYPE" == "postgres" ] && PGPASSWORD=%(dbpass) pg_restore -U %(dbuser) -d %(dbname) -Fc --filename /root/postgres.dump || true',
+                'if [ "$COMPUTE_TYPE" == "mariadb" ]; then rm -f /root/mariadb-restore.sh; wget -O /root/mariadb-restore.sh %(baseUrl)/scripts/mariadb-restore.sh; chmod +x /root/mariadb-restore.sh; bash /root/mariadb-restore.sh %(dbuser) %(dbpass) 2> >(tee -a %(restoreLogFile) >&2); else true; fi',
+                'if [ "$COMPUTE_TYPE" == "mysql" ] || [ "$COMPUTE_TYPE" == "percona" ]; then mysql --silent -h localhost -u %(dbuser) -p%(dbpass) --force < /root/db_backup.sql 2> >(tee -a %(restoreLogFile) >&2); else true; fi',
                 'if [ "$COMPUTE_TYPE" == "mongodb" ]; then rm -f /root/mongo-restore.sh; wget -O /root/mongo-restore.sh %(baseUrl)/scripts/mongo-restore.sh; chmod +x /root/mongo-restore.sh; bash /root/mongo-restore.sh %(dbuser) %(dbpass) 2> >(tee -a %(restoreLogFile) >&2); else true; fi',
-		'jem service restart',
-		'if [ -n "$REPLICA_PSWD" ] && [ -n "$REPLICA_USER" ] ; then wget %(baseUrl)/scripts/setupUser.sh -O /root/setupUser.sh &>> /var/log/run.log; bash /root/setupUser.sh ${REPLICA_USER} ${REPLICA_PSWD} %(userEmail) %(envName) %(userSession); fi',
-		'echo $(date) %(envName) snapshot $(cat /root/.backupid) restored successfully| tee -a %(restoreLogFile)'
+                'jem service restart',
+                'if [ -n "$REPLICA_PSWD" ] && [ -n "$REPLICA_USER" ] ; then wget %(baseUrl)/scripts/setupUser.sh -O /root/setupUser.sh &>> /var/log/run.log; bash /root/setupUser.sh ${REPLICA_USER} ${REPLICA_PSWD} %(userEmail) %(envName) %(userSession); fi',
+                'echo $(date) %(envName) snapshot $(cat /root/.backupid) restored successfully| tee -a %(restoreLogFile)'
             ], {
-                nodeId : config.backupExecNode,
-                envName : config.envName,
-		baseUrl : config.baseUrl,
-		dbuser: config.dbuser,
-		dbpass: config.dbpass,
-		userEmail: user.email,
-		userSession: session,
-		restoreLogFile : "/var/log/backup_addon_restore.log"
+                nodeId: config.backupExecNode,
+                envName: config.envName,
+                baseUrl: config.baseUrl,
+                dbuser: config.dbuser,
+                dbpass: config.dbpass,
+                userEmail: user.email,
+                userSession: session,
+                restoreLogFile: "/var/log/backup_addon_restore.log"
             }],
-        [ me.removeMounts ]
-    ]);
+            [me.removeMounts]
+        ]);
     }
-	
+
     me.checkCredentials = function () {
         var checkCredentialsCmd = "wget " + config.baseUrl + "/scripts/checkCredentials.sh -O /root/checkCredentials.sh &>> /var/log/run.log; chmod +x /root/checkCredentials.sh; bash /root/checkCredentials.sh checkCredentials " + config.dbuser + " " + config.dbpass;
-        resp = jelastic.env.control.ExecCmdById(config.envName, session, config.backupExecNode, toJSON([{ command: checkCredentialsCmd }]), true, "root");
+        resp = jelastic.env.control.ExecCmdById(config.envName, session, config.backupExecNode, toJSON([{command: checkCredentialsCmd}]), true, "root");
         if (resp.result != 0) {
             var title = "Database credentials specified in Backup add-on for " + config.envName + " are incorrect",
                 text = "Database credentials specified in Backup add-on for " + config.envName + " are incorrect. Please specify the right username and password in add-on settings.";
@@ -225,22 +231,22 @@ function BackupManager(config) {
             } catch (ex) {
                 emailResp = error(Response.ERROR_UNKNOWN, toJSON(ex));
             }
-	    return {
-                result : Response.ERROR_UNKNOWN,
-                error : "DB credentials set in Backup add-on for " + config.envName + " are wrong"
+            return {
+                result: Response.ERROR_UNKNOWN,
+                error: "DB credentials set in Backup add-on for " + config.envName + " are wrong"
             }
         }
-        return { result : 0 };
+        return {result: 0};
     }
 
     me.addMountForBackup = function addMountForBackup() {
-	var delay = (Math.floor(Math.random() * 50) * 1000);
-	java.lang.Thread.sleep(delay);
+        var delay = (Math.floor(Math.random() * 50) * 1000);
+        java.lang.Thread.sleep(delay);
         return me.addMountForRestore();
     }
-	
+
     me.addMountForRestore = function addMountForRestore() {
-	var resp = jelastic.env.file.AddMountPointById(config.envName, session, config.backupExecNode, "/opt/backup", 'nfs4', null, '/data/', config.storageNodeId, 'DBBackupRestore', false);
+        var resp = jelastic.env.file.AddMountPointById(config.envName, session, config.backupExecNode, "/opt/backup", 'nfs4', null, '/data/', config.storageNodeId, 'DBBackupRestore', false);
         if (resp.result != 0) {
             var title = "Backup storage " + config.storageEnv + " is unreacheable",
                 text = "Backup storage environment " + config.storageEnv + " is not accessible for storing backups from " + config.envName + ". The error message is " + resp.error;
@@ -280,31 +286,32 @@ function BackupManager(config) {
     me.checkEnvStatus = function checkEnvStatus() {
         if (!nodeManager.isEnvRunning()) {
             return {
-                result : EnvironmentResponse.ENVIRONMENT_NOT_RUNNING,
-                error : _("env [%(name)] not running", {name : config.envName})
+                result: EnvironmentResponse.ENVIRONMENT_NOT_RUNNING,
+                error: _("env [%(name)] not running", {name: config.envName})
             };
         }
 
-        return { result : 0 };
+        return {result: 0};
     };
-	
+
     me.checkStorageEnvStatus = function checkStorageEnvStatus() {
-        if(typeof config.storageEnv !== 'undefined'){
+        if (typeof config.storageEnv !== 'undefined') {
             var resp = jelastic.env.control.GetEnvInfo(config.storageEnv, session);
-            if (resp.result === 11){
+            if (resp.result === 11) {
                 return {
-                    result : EnvironmentResponse.ENVIRONMENT_NOT_EXIST,
-                    error : _("Storage env [%(name)] is deleted", {name : config.storageEnv})
+                    result: EnvironmentResponse.ENVIRONMENT_NOT_EXIST,
+                    error: _("Storage env [%(name)] is deleted", {name: config.storageEnv})
                 };
             } else if (resp.env.status === 2) {
                 return {
-                    result : EnvironmentResponse.ENVIRONMENT_NOT_RUNNING,
-                    error : _("Storage env [%(name)] not running", {name : config.storageEnv})
+                    result: EnvironmentResponse.ENVIRONMENT_NOT_RUNNING,
+                    error: _("Storage env [%(name)] not running", {name: config.storageEnv})
                 };
             }
-            return { result : 0 };
-        };
-        return { result : 0 };
+            return {result: 0};
+        }
+        ;
+        return {result: 0};
     };
 
     me.createScript = function createScript() {
@@ -329,7 +336,7 @@ function BackupManager(config) {
             //build script to avoid caching
             jelastic.dev.scripting.Build(scriptName);
         } catch (ex) {
-            resp = { result : Response.ERROR_UNKNOWN, error: toJSON(ex) };
+            resp = {result: Response.ERROR_UNKNOWN, error: toJSON(ex)};
         }
 
         return resp;
@@ -346,13 +353,13 @@ function BackupManager(config) {
                 session: session,
                 script: config.scriptName,
                 trigger: "cron:" + quartz[i],
-                params: { task: 1, action : "backup" }
+                params: {task: 1, action: "backup"}
             });
 
             if (resp.result !== 0) return resp;
         }
 
-        return { result: 0 };
+        return {result: 0};
     };
 
     me.clearScheduledBackups = function clearScheduledBackups() {
@@ -396,20 +403,20 @@ function BackupManager(config) {
             fn;
 
         if (!methods.push) {
-            methods = [ Array.prototype.slice.call(arguments) ];
+            methods = [Array.prototype.slice.call(arguments)];
             onFail = null;
             bBreakOnError = true;
         }
 
         for (var i = 0, n = methods.length; i < n; i++) {
             if (!methods[i].push) {
-                methods[i] = [ methods[i] ];
+                methods[i] = [methods[i]];
             }
 
             fn = methods[i][0];
             methods[i].shift();
 
-            log(fn.name + (methods[i].length > 0 ?  ": " + methods[i] : ""));
+            log(fn.name + (methods[i].length > 0 ? ": " + methods[i] : ""));
             scope = oScope || (methods[methods.length - 1] || {}).scope || this;
             resp = fn.apply(scope, methods[i]);
 
@@ -458,7 +465,7 @@ function BackupManager(config) {
 
             return envInfo;
         };
-        
+
         me.getStorageEnvInfo = function () {
             var resp;
             if (!storageEnvInfo) {
@@ -483,20 +490,20 @@ function BackupManager(config) {
             }
 
             if (values.nodeGroup) {
-                resp = jelastic.env.control.ExecCmdByGroup(envName, session, values.nodeGroup, toJSON([{ command: command }]), true, false, "root");
+                resp = jelastic.env.control.ExecCmdByGroup(envName, session, values.nodeGroup, toJSON([{command: command}]), true, false, "root");
             } else {
-                resp = jelastic.env.control.ExecCmdById(envName, session, values.nodeId, toJSON([{ command: command }]), true, "root");
+                resp = jelastic.env.control.ExecCmdById(envName, session, values.nodeId, toJSON([{command: command}]), true, "root");
             }
-        
-        if (resp.result != 0) {
-        var title = "Backup failed for " + config.envName,
-                text = "Backup failed for the environment " + config.envName + " of " + user.email + " with error message " + resp.responses[0].errOut;
-        try {
+
+            if (resp.result != 0) {
+                var title = "Backup failed for " + config.envName,
+                    text = "Backup failed for the environment " + config.envName + " of " + user.email + " with error message " + resp.responses[0].errOut;
+                try {
                     jelastic.message.email.Send(appid, signature, null, user.email, user.email, title, text);
-        } catch (ex) {
-            emailResp = error(Response.ERROR_UNKNOWN, toJSON(ex));
-        }
-        }
+                } catch (ex) {
+                    emailResp = error(Response.ERROR_UNKNOWN, toJSON(ex));
+                }
+            }
             return resp;
         };
     }
@@ -563,7 +570,6 @@ function BackupManager(config) {
                 } else {
                     quartzCompatibleStr += chr;
                 }
-
 
 
             });

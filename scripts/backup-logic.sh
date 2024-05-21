@@ -8,8 +8,22 @@ ENV_NAME=$6
 BACKUP_COUNT=$7
 DBUSER=$8
 DBPASSWD=$9
-USER_SESSION=${10}
-USER_EMAIL=${11}
+DBNAME=${10}
+REPO_NAME=${11}
+if [ -z "$REPO_NAME" ]
+then
+REPO_NAME=$ENV_NAME
+echo "No repo name set, overriding with env name"
+fi
+
+REPO_PASS=${12}
+if [ -z "$REPO_PASS" ]
+then
+REPO_PASS=$ENV_NAME
+echo "No repo pass set, overriding with env name"
+fi
+USER_SESSION=${13}
+USER_EMAIL=${14}
 
 BACKUP_ADDON_REPO=$(echo ${BASE_URL}|sed 's|https:\/\/raw.githubusercontent.com\/||'|awk -F / '{print $1"/"$2}')
 BACKUP_ADDON_BRANCH=$(echo ${BASE_URL}|sed 's|https:\/\/raw.githubusercontent.com\/||'|awk -F / '{print $3}')
@@ -45,22 +59,22 @@ function sendEmailNotification(){
         [ -e "/var/run/jem.pid" ] && return 0;
         CURRENT_PLATFORM_MAJOR_VERSION=$(jem api apicall -s --connect-timeout 3 --max-time 15 [API_DOMAIN]/1.0/statistic/system/rest/getversion 2>/dev/null |jq .version|grep -o [0-9.]*|awk -F . '{print $1}')
         if [ "${CURRENT_PLATFORM_MAJOR_VERSION}" -ge "7" ]; then
-            echo $(date) ${ENV_NAME} "Sending e-mail notification about removing the stale lock" | tee -a $BACKUP_LOG_FILE;
-            SUBJECT="Stale lock is removed on /opt/backup/${ENV_NAME} backup repo"
-            BODY="Please pay attention to /opt/backup/${ENV_NAME} backup repo because the stale lock left from previous operation is removed during the integrity check and backup rotation. Manual check of backup repo integrity and consistency is highly desired."
+            echo $(date) ${REPO_NAME} "Sending e-mail notification about removing the stale lock" | tee -a $BACKUP_LOG_FILE;
+            SUBJECT="Stale lock is removed on /opt/backup/${REPO_NAME} backup repo"
+            BODY="Please pay attention to /opt/backup/${REPO_NAME} backup repo because the stale lock left from previous operation is removed during the integrity check and backup rotation. Manual check of backup repo integrity and consistency is highly desired."
             jem api apicall -s --connect-timeout 3 --max-time 15 [API_DOMAIN]/1.0/message/email/rest/send --data-urlencode "session=$USER_SESSION" --data-urlencode "to=$USER_EMAIL" --data-urlencode "subject=$SUBJECT" --data-urlencode "body=$BODY"
             if [[ $? != 0 ]]; then
-                echo $(date) ${ENV_NAME} "Sending of e-mail notification failed" | tee -a $BACKUP_LOG_FILE;
+                echo $(date) ${REPO_NAME} "Sending of e-mail notification failed" | tee -a $BACKUP_LOG_FILE;
             else
-                echo $(date) ${ENV_NAME} "E-mail notification is sent successfully" | tee -a $BACKUP_LOG_FILE;
+                echo $(date) ${REPO_NAME} "E-mail notification is sent successfully" | tee -a $BACKUP_LOG_FILE;
             fi
         elif [ -z "${CURRENT_PLATFORM_MAJOR_VERSION}" ]; then #this elif covers the case if the version is not received
-            echo $(date) ${ENV_NAME} "Error when checking the platform version" | tee -a $BACKUP_LOG_FILE;
+            echo $(date) ${REPO_NAME} "Error when checking the platform version" | tee -a $BACKUP_LOG_FILE;
         else
-            echo $(date) ${ENV_NAME} "Email notification is not sent because this functionality is unavailable for current platform version." | tee -a $BACKUP_LOG_FILE;
+            echo $(date) ${REPO_NAME} "Email notification is not sent because this functionality is unavailable for current platform version." | tee -a $BACKUP_LOG_FILE;
         fi
     else
-        echo $(date) ${ENV_NAME} "Email notification is not sent because this functionality is unavailable for current platform version." | tee -a $BACKUP_LOG_FILE;
+        echo $(date) ${REPO_NAME} "Email notification is not sent because this functionality is unavailable for current platform version." | tee -a $BACKUP_LOG_FILE;
     fi
 }
 
@@ -73,51 +87,52 @@ function update_restic(){
 }
 
 function check_backup_repo(){
-    [ -d /opt/backup/${ENV_NAME} ] || mkdir -p /opt/backup/${ENV_NAME}
-    export FILES_COUNT=$(ls -n /opt/backup/${ENV_NAME}|awk '{print $2}');
-    if [ "${FILES_COUNT}" != "0" ]; then 
-        echo $(date) ${ENV_NAME}  "Checking the backup repository integrity and consistency" | tee -a $BACKUP_LOG_FILE;
-        if [[ $(ls -A /opt/backup/${ENV_NAME}/locks) ]] ; then
-	    echo $(date) ${ENV_NAME}  "Backup repository has a slate lock, removing" | tee -a $BACKUP_LOG_FILE;
-            GOGC=20 RESTIC_PASSWORD=${ENV_NAME} restic -r /opt/backup/${ENV_NAME} unlock
-	    sendEmailNotification
+    [ -d /opt/backup/${REPO_NAME} ] || mkdir -p /opt/backup/${REPO_NAME}
+    export FILES_COUNT=$(ls -n /opt/backup/${REPO_NAME}|awk '{print $2}');
+    if [ "${FILES_COUNT}" != "0" ]; then
+        echo $(date) ${REPO_NAME}  "Checking the backup repository integrity and consistency" | tee -a $BACKUP_LOG_FILE;
+        if [[ $(ls -A /opt/backup/${REPO_NAME}/locks) ]] ; then
+	          echo $(date) ${REPO_NAME}  "Backup repository has a slate lock, removing" | tee -a $BACKUP_LOG_FILE;
+            GOGC=20 RESTIC_PASSWORD=${REPO_PASS} restic -r /opt/backup/${REPO_NAME} unlock
+	          sendEmailNotification
         fi
-        GOGC=20 RESTIC_PASSWORD=${ENV_NAME} restic -q -r /opt/backup/${ENV_NAME} check --read-data-subset=5% || { echo "Backup repository integrity check failed."; exit 1; }
+        GOGC=20 RESTIC_PASSWORD=${REPO_PASS} restic -q -r /opt/backup/${REPO_NAME} check --read-data-subset=5% || { echo "Backup repository integrity check failed."; exit 1; }
     else
-        GOGC=20 RESTIC_PASSWORD=${ENV_NAME} restic init -r /opt/backup/${ENV_NAME}
+        GOGC=20 RESTIC_PASSWORD=${REPO_PASS} restic init -r /opt/backup/${REPO_NAME}
     fi
 }
 
 function rotate_snapshots(){
-    echo $(date) ${ENV_NAME} "Rotating snapshots by keeping the last ${BACKUP_COUNT}" | tee -a ${BACKUP_LOG_FILE}
-    if [[ $(ls -A /opt/backup/${ENV_NAME}/locks) ]] ; then
-        echo $(date) ${ENV_NAME}  "Backup repository has a slate lock, removing" | tee -a $BACKUP_LOG_FILE;
-        GOGC=20 RESTIC_PASSWORD=${ENV_NAME} restic -r /opt/backup/${ENV_NAME} unlock
+    echo $(date) ${REPO_NAME} "Rotating snapshots by keeping the last ${BACKUP_COUNT}" | tee -a ${BACKUP_LOG_FILE}
+    if [[ $(ls -A /opt/backup/${REPO_NAME}/locks) ]] ; then
+        echo $(date) ${REPO_NAME}  "Backup repository has a slate lock, removing" | tee -a $BACKUP_LOG_FILE;
+        GOGC=20 RESTIC_PASSWORD=${REPO_PASS} restic -r /opt/backup/${REPO_NAME} unlock
 	sendEmailNotification
     fi
-    { GOGC=20 RESTIC_PASSWORD=${ENV_NAME} restic forget -q -r /opt/backup/${ENV_NAME} --keep-last ${BACKUP_COUNT} --prune | tee -a $BACKUP_LOG_FILE; } || { echo "Backup rotation failed."; exit 1; }
+    { GOGC=20 RESTIC_PASSWORD=${REPO_PASS} restic forget -q -r /opt/backup/${REPO_NAME} --keep-last ${BACKUP_COUNT} --prune | tee -a $BACKUP_LOG_FILE; } || { echo "Backup rotation failed."; exit 1; }
 }
 
 function create_snapshot(){
-    source /etc/jelastic/metainf.conf 
-    echo $(date) ${ENV_NAME} "Saving the DB dump to ${DUMP_NAME} snapshot" | tee -a ${BACKUP_LOG_FILE}
+    source /etc/jelastic/metainf.conf
     DUMP_NAME=$(date "+%F_%H%M%S_%Z"-${BACKUP_TYPE}\($COMPUTE_TYPE-$COMPUTE_TYPE_FULL_VERSION$REDIS_TYPE$MONGO_TYPE\))
+    echo $(date) ${REPO_NAME} "Saving the DB dump to ${DUMP_NAME} snapshot" | tee -a ${BACKUP_LOG_FILE}
     if [ "$COMPUTE_TYPE" == "redis" ]; then
         RDB_TO_BACKUP=$(ls -d /tmp/* |grep redis-dump.*);
-        GOGC=20 RESTIC_COMPRESSION=off RESTIC_PACK_SIZE=8 RESTIC_PASSWORD=${ENV_NAME} restic backup -q -r /opt/backup/${ENV_NAME} --tag "${DUMP_NAME} ${BACKUP_ADDON_COMMIT_ID} ${BACKUP_TYPE}" ${RDB_TO_BACKUP} | tee -a ${BACKUP_LOG_FILE};
+        GOGC=20 RESTIC_COMPRESSION=off RESTIC_PACK_SIZE=8 RESTIC_PASSWORD=${REPO_PASS} restic backup -q -r /opt/backup/${REPO_NAME} --tag "${DUMP_NAME} ${BACKUP_ADDON_COMMIT_ID} ${BACKUP_TYPE}" ${RDB_TO_BACKUP} | tee -a ${BACKUP_LOG_FILE};
+    elif [ "$COMPUTE_TYPE" == "postgres" ]; then
+        RESTIC_PASSWORD=${REPO_PASS} restic -q -r /opt/backup/${REPO_NAME}  backup --tag "${DUMP_NAME} ${BACKUP_ADDON_COMMIT_ID} ${BACKUP_TYPE}" ~/postgres.dump | tee -a ${BACKUP_LOG_FILE}
     elif [ "$COMPUTE_TYPE" == "mongodb" ]; then
-        echo $(date) ${ENV_NAME} "Saving the DB dump to ${DUMP_NAME} snapshot" | tee -a ${BACKUP_LOG_FILE}
-        GOGC=20 RESTIC_COMPRESSION=off RESTIC_PACK_SIZE=8 RESTIC_PASSWORD=${ENV_NAME} restic backup -q -r /opt/backup/${ENV_NAME} --tag "${DUMP_NAME} ${BACKUP_ADDON_COMMIT_ID} ${BACKUP_TYPE}" ~/dump | tee -a ${BACKUP_LOG_FILE}	    
+        RESTIC_PASSWORD=${REPO_PASS} restic -q -r /opt/backup/${REPO_NAME}  backup --tag "${DUMP_NAME} ${BACKUP_ADDON_COMMIT_ID} ${BACKUP_TYPE}" /root/db_backup.mongodump | tee -a ${BACKUP_LOG_FILE}
     else
-        GOGC=20 RESTIC_COMPRESSION=off RESTIC_PACK_SIZE=8 RESTIC_PASSWORD=${ENV_NAME} restic backup -q -r /opt/backup/${ENV_NAME} --tag "${DUMP_NAME} ${BACKUP_ADDON_COMMIT_ID} ${BACKUP_TYPE}" ~/db_backup.sql | tee -a ${BACKUP_LOG_FILE}
+        GOGC=20 RESTIC_COMPRESSION=off RESTIC_PACK_SIZE=8 RESTIC_PASSWORD=${REPO_PASS} restic backup -q -r /opt/backup/${REPO_NAME} --tag "${DUMP_NAME} ${BACKUP_ADDON_COMMIT_ID} ${BACKUP_TYPE}" ~/db_backup.sql | tee -a ${BACKUP_LOG_FILE}
     fi
 }
 
 function backup(){
-    echo $$ > /var/run/${ENV_NAME}_backup.pid
-    echo $(date) ${ENV_NAME} "Creating the ${BACKUP_TYPE} backup (using the backup addon with commit id ${BACKUP_ADDON_COMMIT_ID}) on storage node ${NODE_ID}" | tee -a ${BACKUP_LOG_FILE}
+    echo $$ > /var/run/${REPO_NAME}_backup.pid
+    echo $(date) ${REPO_NAME} "Creating the ${BACKUP_TYPE} backup (using the backup addon with commit id ${BACKUP_ADDON_COMMIT_ID}) on storage node ${NODE_ID}" | tee -a ${BACKUP_LOG_FILE}
     source /etc/jelastic/metainf.conf;
-    echo $(date) ${ENV_NAME} "Creating the DB dump" | tee -a ${BACKUP_LOG_FILE}
+    echo $(date) ${REPO_NAME} "Creating the DB dump" | tee -a ${BACKUP_LOG_FILE}
     if [ "$COMPUTE_TYPE" == "redis" ]; then
         RDB_TO_REMOVE=$(ls -d /tmp/* |grep redis-dump.*)
         rm -f ${RDB_TO_REMOVE}
@@ -133,21 +148,9 @@ function backup(){
         fi
     elif [ "$COMPUTE_TYPE" == "postgres" ]; then
         PGPASSWORD="${DBPASSWD}" psql -U ${DBUSER} -d postgres -c "SELECT current_user" || { echo "DB credentials specified in add-on settings are incorrect!"; exit 1; }
-	PGPASSWORD="${DBPASSWD}" pg_dumpall -U webadmin | grep -v '^ALTER ROLE webadmin WITH SUPERUSER' > db_backup.sql || { echo "DB backup process failed."; exit 1; } 
+        PGPASSWORD="${DBPASSWD}" pg_dump -Fc -Z 9 --file=postgres.dump -U ${DBUSER} ${DBNAME} || { echo "DB backup process failed."; exit 1; }
     elif [ "$COMPUTE_TYPE" == "mongodb" ]; then
-        if grep -q ^[[:space:]]*replSetName /etc/mongod.conf; then
-            RS_NAME=$(grep ^[[:space:]]*replSetName /etc/mongod.conf|awk '{print $2}');
-	    RS_SUFFIX="/?replicaSet=${RS_NAME}&readPreference=nearest";
-        else
-            RS_SUFFIX="";
-        fi
-	TLS_MODE=$(yq eval  '.net.tls.mode' /etc/mongod.conf)
-        if [ "$TLS_MODE" == "requireTLS" ]; then
-	    SSL_TLS_OPTIONS="--ssl --sslPEMKeyFile=/var/lib/jelastic/keys/SSL-TLS/client/client.pem --sslCAFile=/var/lib/jelastic/keys/SSL-TLS/client/root.pem --tlsInsecure"
-        else
-	    SSL_TLS_OPTIONS=""
-	fi
-        mongodump ${SSL_TLS_OPTIONS} --uri="mongodb://${DBUSER}:${DBPASSWD}@localhost${RS_SUFFIX}"
+        mongodump --uri="mongodb://localhost:27017/${DBNAME}" --username ${DBUSER} --password ${DBPASSWD} --archive=db_backup.mongodump || { echo "DB backup process failed."; exit 1; }
     else
         SERVER_IP_ADDR=$(ip a | grep -A1 venet0 | grep inet | awk '{print $2}'| sed 's/\/[0-9]*//g' | tail -n 1)
         [ -n "${SERVER_IP_ADDR}" ] || SERVER_IP_ADDR="localhost"
@@ -164,7 +167,7 @@ function backup(){
         ${CLIENT_APP} -h ${SERVER_IP_ADDR} -u ${DBUSER} -p${DBPASSWD} mysql --execute="SHOW COLUMNS FROM user" || { echo "DB credentials specified in add-on settings are incorrect!"; exit 1; }
         ${DUMP_APP} -h ${SERVER_IP_ADDR} -u ${DBUSER} -p${DBPASSWD} --force --single-transaction --quote-names --opt --all-databases > db_backup.sql || { echo "DB backup process failed."; exit 1; }
     fi
-    rm -f /var/run/${ENV_NAME}_backup.pid
+    rm -f /var/run/${REPO_NAME}_backup.pid
 }
 
 case "$1" in
