@@ -57,7 +57,7 @@ function forceInstallUpdateRestic(){
 function sendEmailNotification(){
     if [ -e "/usr/lib/jelastic/modules/api.module" ]; then
         [ -e "/var/run/jem.pid" ] && return 0;
-        CURRENT_PLATFORM_MAJOR_VERSION=$(jem api apicall -s --connect-timeout 3 --max-time 15 [API_DOMAIN]/1.0/statistic/system/rest/getversion 2>/dev/null |jq .version|grep -o [0-9.]*|awk -F . '{print $1}')
+        CURRENT_PLATFORM_MAJOR_VERSION=$(jem api apicall -s --connect-timeout 3 --max-time 15 [API_DOMAIN]/1.0/statistic/system/rest/getversion 2>/dev/null |grep -o '"version":"[^"]*"'|grep -o [0-9.]*|awk -F . '{print $1}')
         if [ "${CURRENT_PLATFORM_MAJOR_VERSION}" -ge "7" ]; then
             echo $(date) ${REPO_NAME} "Sending e-mail notification about removing the stale lock" | tee -a $BACKUP_LOG_FILE;
             SUBJECT="Stale lock is removed on /opt/backup/${REPO_NAME} backup repo"
